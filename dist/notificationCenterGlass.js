@@ -81,6 +81,13 @@ export class NotificationCenterGlassManager extends QuickSettingsManager {
         }
     }
 
+    _syncToggleRegions() {
+        super._syncToggleRegions();
+        if (this.glass && this.glass.visible) {
+            this.glass.opacity = this.menu?.actor?.opacity ?? 255;
+        }
+    }
+
     _applyEffect() {
         if (!this.targetActor) {
             const menu = Main.panel.statusArea.dateMenu?.menu ?? null;
