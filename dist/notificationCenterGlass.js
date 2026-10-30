@@ -17,8 +17,7 @@ export class NotificationCenterGlassManager extends QuickSettingsManager {
 
     _togglesDesired() {
         return !!this._settings &&
-            this._settings.get_boolean('enable-quick-settings-glass') &&
-            this._settings.get_int('quick-settings-apply-to') === 1;
+            this._settings.get_boolean('enable-quick-settings-glass');
     }
 
     setup() {
@@ -27,7 +26,7 @@ export class NotificationCenterGlassManager extends QuickSettingsManager {
         this._bindSettings();
         this._applyTo = 'toggles';
         this._toggleBaseStrength = this._settings.get_double('quick-settings-toggle-tint-strength');
-        this._toggleCornerRadius = this._settings.get_double('quick-settings-toggle-corner-radius');
+        this._toggleCornerRadius = 32.5;
         if (this._togglesDesired())
             this._applyEffect();
     }
@@ -55,9 +54,9 @@ export class NotificationCenterGlassManager extends QuickSettingsManager {
             this._toggleBaseStrength = this._settings.get_double('quick-settings-toggle-tint-strength');
         });
         connectSetting('quick-settings-toggle-corner-radius', () => {
-            this._toggleCornerRadius = this._settings.get_double('quick-settings-toggle-corner-radius');
+            this._toggleCornerRadius = 32.5;
             if (this.glass && this._activeMode === 'toggles')
-                this.glass.setCornerRadius(this._toggleCornerRadius);
+                this.glass.setCornerRadius(32.5);
         });
         connectSetting('quick-settings-brightness', () => {
             if (this.glass)
@@ -83,11 +82,18 @@ export class NotificationCenterGlassManager extends QuickSettingsManager {
     }
 
     _applyEffect() {
+        if (!this.targetActor) {
+            const menu = Main.panel.statusArea.dateMenu?.menu ?? null;
+            this.menu = menu;
+            this.targetActor = menu?.actor ?? null;
+            this.animActor = menu?.box ?? null;
+        }
         if (this._isEffectActive || !this._togglesDesired() || !this.targetActor)
             return;
         this._isEffectActive = true;
         this._activeMode = 'toggles';
         this._applyTo = 'toggles';
+        this._toggleCornerRadius = 32.5;
         this._tintColorArray = hexToColorArray(this._settings.get_string('quick-settings-tint-color'));
         this._applyToggleEffect();
     }
