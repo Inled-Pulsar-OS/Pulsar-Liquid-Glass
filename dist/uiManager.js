@@ -1,7 +1,7 @@
 import { stepMenuSpring, applyMenuFrame, showMenuAtRest } from './animation/menuSpring.js';
 import { addFrameTicker, removeFrameTicker, normalizeAnimationIntervalMs } from './animation/frameTicker.js';
 import { Spring, SwiftSpring } from './animation/spring.js';
-import { MenuMorphMotion } from './animation/menuMorph.js';
+import { DropMorphMotion } from './animation/dropMorph.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
@@ -121,6 +121,7 @@ export class UIManager {
     _swiftSpringScale;
     _enableAnimation;
     _growFromButton = true;
+    _animationOrigin = null;
     _morph = null;
     _morphTickId = 0;
     _interfaceSettings = null;
@@ -1196,6 +1197,8 @@ export class UIManager {
     // when it is not on screen. Panel buttons draw it inside a transparent
     // border, and the clock on its label rather than on the whole button.
     _buttonRect() {
+        if (this._animationOrigin)
+            return this._animationOrigin;
         const source = this.menu?.sourceActor;
         if (!source || !isActorValid(source) || !source.mapped)
             return null;
@@ -1212,6 +1215,11 @@ export class UIManager {
         if (w - left - right < 1 || h - top - bottom < 1)
             return [x, y, w, h];
         return [x + left, y + top, w - left - right, h - top - bottom];
+    }
+    /** Sets the stage-space point a context menu should morph out of. */
+    setAnimationOrigin(x, y) {
+        this._animationOrigin = Number.isFinite(x) && Number.isFinite(y)
+            ? [x - 1, y - 1, 2, 2] : null;
     }
     // Where the menu's items are at rest: their stage rect without the
     // morph's own scale and shift, and the scale (`k`) the menu puts on them.
@@ -1303,7 +1311,7 @@ export class UIManager {
                 this._endMorph();
                 return false;
             }
-            m.motion = new MenuMorphMotion(m.opening, m.button, menu, this._cornerRadius * this._menuScale);
+            m.motion = new DropMorphMotion(m.opening, m.button, menu, this._cornerRadius * this._menuScale);
         }
         else {
             m.motion.retarget(m.button, menu, this._cornerRadius * this._menuScale);
@@ -1312,7 +1320,7 @@ export class UIManager {
         const frame = m.motion.step(m.lastUs ? (now - m.lastUs) / 1e6 : 1 / 60);
         m.lastUs = now;
         this._placeMorph(frame);
-        if (!frame.done)
+        if (!m.motion.done)
             return true;
         this._morphTickId = 0;
         const closed = !m.opening;
