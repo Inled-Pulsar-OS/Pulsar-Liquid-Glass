@@ -69,7 +69,7 @@
       <description>Adjusts the saturation of the dock.</description>
     </key>
     <key name="dock-corner-radius" type="d">
-      <default>20.0</default>
+      <default>16.0</default>
       <summary>Corner radius</summary>
     </key>
 
