@@ -2,6 +2,7 @@ import { stepMenuSpring, applyMenuFrame, showMenuAtRest } from './animation/menu
 import { addFrameTicker, removeFrameTicker, normalizeAnimationIntervalMs } from './animation/frameTicker.js';
 import { Spring, SwiftSpring } from './animation/spring.js';
 import { MenuMorphMotion, type MorphFrame } from './animation/menuMorph.js';
+import { DropMorphMotion } from './animation/dropMorph.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
@@ -1328,7 +1329,7 @@ export class UIManager {
       showMenuAtRest(this.glass, this.animActor);
       return;
     }
-    if (this._growFromButton && St.Settings.get().enable_animations && this._startMorph(targetValue === 1))
+    if (this._growFromButton && (St.Settings.get().enable_animations || this._enableAnimation) && this._startMorph(targetValue === 1))
       return;
     this._endMorph();
 
@@ -1370,8 +1371,19 @@ export class UIManager {
   // border, and the clock on its label rather than on the whole button.
   private _buttonRect(): number[] | null {
     if (this._animationOrigin) return this._animationOrigin;
-    const source = this.menu?.sourceActor;
-    if (!source || !isActorValid(source) || !source.mapped) return null;
+    const source = this.menu?.sourceActor ?? (this.menu as any)?._boxPointer?._sourceActor;
+    if (!source || !isActorValid(source) || !source.mapped) {
+      if (this.menu?.actor && isActorValid(this.menu.actor)) {
+        try {
+          const [mx, my] = this.menu.actor.get_transformed_position();
+          const [mw] = this.menu.actor.get_transformed_size();
+          if (Number.isFinite(mx) && Number.isFinite(my) && mw > 10) {
+            return [mx + mw / 2 - 20, Math.max(0, my - 10), 40, 4];
+          }
+        } catch (e) {}
+      }
+      return null;
+    }
     const label = (source as any)._clockDisplay;
     const actor: St.Widget = label instanceof St.Widget && label.mapped ? label : source;
     const [x, y] = actor.get_transformed_position();
@@ -1476,7 +1488,7 @@ export class UIManager {
         this._endMorph();
         return false;
       }
-      m.motion = new MenuMorphMotion(m.opening, m.button, menu, this._cornerRadius * this._menuScale);
+      m.motion = new DropMorphMotion(m.opening, m.button, menu, this._cornerRadius * this._menuScale);
     } else {
       m.motion.retarget(m.button, menu, this._cornerRadius * this._menuScale);
     }
@@ -1485,7 +1497,7 @@ export class UIManager {
     const frame = m.motion.step(m.lastUs ? (now - m.lastUs) / 1e6 : 1 / 60);
     m.lastUs = now;
     this._placeMorph(frame);
-    if (!frame.done) return true;
+    if (!m.motion.done) return true;
 
     this._morphTickId = 0;
     const closed = !m.opening;

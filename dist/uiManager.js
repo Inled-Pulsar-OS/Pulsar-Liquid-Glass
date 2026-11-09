@@ -1158,7 +1158,7 @@ export class UIManager {
             showMenuAtRest(this.glass, this.animActor);
             return;
         }
-        if (this._growFromButton && St.Settings.get().enable_animations && this._startMorph(targetValue === 1))
+        if (this._growFromButton && (St.Settings.get().enable_animations || this._enableAnimation) && this._startMorph(targetValue === 1))
             return;
         this._endMorph();
         if (this.animActor)
@@ -1199,9 +1199,19 @@ export class UIManager {
     _buttonRect() {
         if (this._animationOrigin)
             return this._animationOrigin;
-        const source = this.menu?.sourceActor;
-        if (!source || !isActorValid(source) || !source.mapped)
+        const source = this.menu?.sourceActor ?? this.menu?._boxPointer?._sourceActor;
+        if (!source || !isActorValid(source) || !source.mapped) {
+            if (this.menu?.actor && isActorValid(this.menu.actor)) {
+                try {
+                    const [mx, my] = this.menu.actor.get_transformed_position();
+                    const [mw, mh] = this.menu.actor.get_transformed_size();
+                    if (Number.isFinite(mx) && Number.isFinite(my) && mw > 10) {
+                        return [mx + mw / 2 - 20, Math.max(0, my - 10), 40, 4];
+                    }
+                } catch (e) {}
+            }
             return null;
+        }
         const label = source._clockDisplay;
         const actor = label instanceof St.Widget && label.mapped ? label : source;
         const [x, y] = actor.get_transformed_position();

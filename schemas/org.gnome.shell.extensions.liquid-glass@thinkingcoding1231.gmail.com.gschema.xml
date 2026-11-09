@@ -86,7 +86,7 @@
       <summary>Enable menu animation</summary>
     </key>
     <key name="menu-grow-from-button" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Grow the menu out of its button</summary>
       <description>While animations are on, the glass leaves the button as a drop and stretches into the menu, and goes back into the button when the menu closes.</description>
     </key>
