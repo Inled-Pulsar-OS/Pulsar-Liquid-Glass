@@ -156,8 +156,17 @@ export class ApplicationManager {
         return this._listContainsClass(whitelist, metaWindow.get_wm_class());
     }
     _windowMatchesBlacklist(metaWindow) {
+        const wmClass = metaWindow.get_wm_class();
+        const title = metaWindow.get_title();
+        if (wmClass) {
+            const lower = wmClass.toLowerCase();
+            if (lower.includes('notchnux') || lower.includes('notchnuxhelper'))
+                return true;
+        }
+        if (title && title.toLowerCase().includes('notchnux'))
+            return true;
         const blacklist = this._settings.get_strv('application-window-blacklist');
-        return this._listContainsClass(blacklist, metaWindow.get_wm_class());
+        return this._listContainsClass(blacklist, wmClass);
     }
     /**
      * Whether this is the menu the desktop itself puts up (right-click on the
@@ -197,6 +206,8 @@ export class ApplicationManager {
         if (this._isDesktopMenuWindow(metaWindow))
             return this._isProfileEnabled('desktop-menu') ? 'desktop-menu' : null;
         if (!this._isProfileEnabled('application'))
+            return null;
+        if (this._windowMatchesBlacklist(metaWindow))
             return null;
         // "Apply to all windows" skips the whitelist but still only covers normal
         // and dialog windows, and still honours the blacklist.
