@@ -24,6 +24,13 @@ const SHADER_PADDING = 20;
 const SAMPLE_PER_ELEMENT = false;
 // Background mode: opacity of the buttons' own backgrounds over the glass.
 const BUTTON_ALPHA = 0.8;
+function isInsideBubble(actor) {
+    for (let node = actor; node; node = node.get_parent()) {
+        if (node instanceof St.Widget && node.has_style_class_name?.('mac-bubble'))
+            return true;
+    }
+    return false;
+}
 function _collectSubmenus(actor, into) {
     if (!actor)
         return;
@@ -869,7 +876,7 @@ export class QuickSettingsManager {
             return foundActors;
         if (actor instanceof St.Label || actor instanceof Clutter.Text ||
             actor instanceof St.Button || actor instanceof St.Icon) {
-            if (actor.visible)
+            if (actor.visible && !isInsideBubble(actor))
                 foundActors.push(actor);
         }
         for (const child of actor.get_children())
@@ -916,6 +923,7 @@ export class QuickSettingsManager {
         this._styledActors.delete(actor);
     }
     _clearAdaptiveStyles() {
+        this._lastDecidedColor = null;
         this._clearBackdropTracking();
         for (const [actor, originalStyle] of this._styledActors.entries()) {
             adaptiveColorTweener.cancel(actor);
@@ -934,15 +942,34 @@ export class QuickSettingsManager {
         // owns the foreground color of its children. Because St does not support descendant CSS selectors,
         // we must explicitly enforce dark/black (#000000) foreground on those actors instead of releasing them to white.
         for (const actor of [...this._styledActors.keys()]) {
+            if (isInsideBubble(actor)) {
+                this._releaseActorColor(actor);
+                continue;
+            }
             if (stateOwnsForeground(actor, this.menu?.actor ?? null)) {
                 this._setActorColor(actor, '#000000', skipAnimations, batchStart);
             }
         }
-        if (!colorMap || colorMap.size === 0)
+        if (!colorMap || colorMap.size === 0) {
+            if (this._lastDecidedColor) {
+                const allTargets = this._collectAdaptiveTextTargets();
+                const unstyled = allTargets.filter(a => !this._styledActors.has(a) && !isInsideBubble(a));
+                if (unstyled.length > 0) {
+                    for (const actor of unstyled) {
+                        this._setActorColor(actor, this._lastDecidedColor, true, batchStart);
+                    }
+                }
+            }
             return;
+        }
+        const firstColor = colorMap.values().next().value;
+        if (firstColor)
+            this._lastDecidedColor = firstColor;
         this._sampleColors = colorMap;
         // One timestamp for the whole map, so the toggles flip together.
         for (const [actor, color] of colorMap.entries()) {
+            if (isInsideBubble(actor))
+                continue;
             if (stateOwnsForeground(actor, this.menu?.actor ?? null)) {
                 this._setActorColor(actor, '#000000', skipAnimations, batchStart);
                 continue;
@@ -953,6 +980,12 @@ export class QuickSettingsManager {
             }
             const backdrop = this._backdropColors.get(actor);
             this._setActorColor(actor, backdrop ?? color, backdrop !== null || skipAnimations, batchStart);
+        }
+        // Ensure any dynamically created/unallocated targets in the menu get the decided color
+        const allTargets = this._collectAdaptiveTextTargets();
+        const unstyled = allTargets.filter(a => !this._styledActors.has(a) && !isInsideBubble(a));
+        for (const actor of unstyled) {
+            this._setActorColor(actor, this._lastDecidedColor || firstColor, true, batchStart);
         }
     }
     // Watches the text's ancestors, whose restyles can change its backdrop.
