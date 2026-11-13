@@ -92,7 +92,7 @@ export class DialogManager {
         const targetBox = this._findDialogBox(child);
         if (!targetBox)
             return;
-        this._logger?.debug?.(`[Liquid Glass] Attached dialog glass to: ${targetBox}`);
+        this._logger?.log?.(`[Liquid Glass] Attached dialog glass to: ${targetBox}`);
         const origStyle = targetBox.get_style?.() || '';
         if (typeof targetBox.add_style_class_name === 'function')
             targetBox.add_style_class_name('liquid-glass-transparent');
