@@ -134,7 +134,7 @@ export class AdaptiveTextColor {
         const prefix = own ? `${own.replace(/;$/, '')}; ` : '';
         const apply = (r, g, b, a) => {
             const rgba = `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`;
-            actor.set_style(`${prefix}color: ${rgba}; -st-icon-foreground-color: ${rgba};`);
+            actor.set_style(`${prefix}color: ${rgba} !important; -st-icon-foreground-color: ${rgba} !important;`);
         };
         const target = hexToRgb(color);
         if (skip) {

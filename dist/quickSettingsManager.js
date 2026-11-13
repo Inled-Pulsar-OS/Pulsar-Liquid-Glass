@@ -9,7 +9,7 @@ import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import { BackdropGlass } from './rendering/backdropGlass.js';
 import { ToggleBackdropGlass } from './rendering/toggleGlass.js';
-import { StageContrastSampler, AdaptiveContrastConfig, sanitizeColorPreference } from './contrastSampler.js';
+import { StageContrastSampler, AdaptiveContrastConfig, sanitizeColorPreference, stateOwnsForeground } from './contrastSampler.js';
 import { LayoutOpaqueActor } from './actors/unpickable.js';
 import { ensureGlassAllocated } from './actors/allocation.js';
 import { isActorValid } from './actors/lifecycle.js';
@@ -438,6 +438,10 @@ export class QuickSettingsManager {
                     if (this.animActor) {
                         this.animActor.opacity = 0;
                     }
+                    if (this.menu?.actor) {
+                        this.menu.actor.hide();
+                        this.menu.actor.reactive = false;
+                    }
                 }
             })
         });
@@ -453,18 +457,6 @@ export class QuickSettingsManager {
             owner: toggles ? 'quick-settings-toggles' : 'quick-settings',
         };
         const glass = toggles ? new ToggleBackdropGlass(params) : new BackdropGlass(params);
-        // macOS 27: the tile glass carries no inner shadow. The AO band
-        // (`glass-ao-intensity`) is the dark ring lying over every key; it
-        // stays on for every other surface of the suite. The mapping to the
-        // global setting is pinned here, so it also survives a prefs change.
-        const uniforms = glass?._renderer?.uniforms;
-        if (uniforms) {
-            const setUniform = uniforms.set.bind(uniforms);
-            // The refraction stays on the settings again: the lens is the
-            // liquid. Only the AO pin remains.
-            uniforms.set = (key, value) => setUniform(key, key === 'ao_intensity' ? 0 : value);
-            setUniform('ao_intensity', 0.0);
-        }
         this.glass = glass;
         glass.set_size(1.0, 1.0);
         glass.set_pivot_point(0.0, 0.0);
@@ -547,6 +539,16 @@ export class QuickSettingsManager {
             }
             this._stopAdaptiveColorSampling();
             this._toggleStyles.stop();
+            stopFrameSync();
+            if (this.glass) {
+                this.glass.hide();
+                this.glass.opacity = 0;
+                this.glass.reader?.hide();
+            }
+            if (this.menu?.actor) {
+                this.menu.actor.hide();
+                this.menu.actor.reactive = false;
+            }
         });
         this._signals.push({
             target: this.menu.actor,
@@ -889,11 +891,29 @@ export class QuickSettingsManager {
         if (actor instanceof St.Button) {
             isInsensitive = !actor.reactive || actor.has_style_pseudo_class('insensitive');
         }
-        if (actor._currentTargetColor === color && actor._currentInsensitiveState === isInsensitive)
+        // A style that went back to the actor's own was reset by someone else
+        // (the toggle pod re-applying its transparent override, for example); the
+        // color has to be put on again instead of being treated as unchanged.
+        const reset = actor._currentTargetColor !== undefined &&
+            (actor.get_style() ?? '') === (this._styledActors.get(actor) ?? '') &&
+            !adaptiveColorTweener.isAnimating(actor);
+        if (actor._currentTargetColor === color && actor._currentInsensitiveState === isInsensitive && !reset)
             return;
         actor._currentTargetColor = color;
         actor._currentInsensitiveState = isInsensitive;
         this._animateActorColor(actor, color, isInsensitive, 380, skipAnimations, batchStart);
+    }
+    // Gives an actor back to its own stylesheet: used when a checked/active
+    // state paints a background image and must keep its own foreground color.
+    _releaseActorColor(actor) {
+        const originalStyle = this._styledActors.get(actor);
+        if (originalStyle === undefined)
+            return;
+        adaptiveColorTweener.cancel(actor);
+        actor._currentTargetColor = undefined;
+        actor._currentInsensitiveState = undefined;
+        actor.set_style(originalStyle || null);
+        this._styledActors.delete(actor);
     }
     _clearAdaptiveStyles() {
         this._clearBackdropTracking();
@@ -909,12 +929,24 @@ export class QuickSettingsManager {
     // expanded section) takes its color from that backdrop instead of the
     // sample; see _watchBackdrop().
     _applyAdaptiveColorMap(colorMap, skipAnimations = false) {
+        const batchStart = GLib.get_monotonic_time();
+        // A checked/active state with its own background image (such as the white bubble/circle in CC)
+        // owns the foreground color of its children. Because St does not support descendant CSS selectors,
+        // we must explicitly enforce dark/black (#000000) foreground on those actors instead of releasing them to white.
+        for (const actor of [...this._styledActors.keys()]) {
+            if (stateOwnsForeground(actor, this.menu?.actor ?? null)) {
+                this._setActorColor(actor, '#000000', skipAnimations, batchStart);
+            }
+        }
         if (!colorMap || colorMap.size === 0)
             return;
         this._sampleColors = colorMap;
         // One timestamp for the whole map, so the toggles flip together.
-        const batchStart = GLib.get_monotonic_time();
         for (const [actor, color] of colorMap.entries()) {
+            if (stateOwnsForeground(actor, this.menu?.actor ?? null)) {
+                this._setActorColor(actor, '#000000', skipAnimations, batchStart);
+                continue;
+            }
             if (!this._backdropColors.has(actor)) {
                 this._watchBackdrop(actor);
                 this._backdropColors.set(actor, this._contrastSampler._backdropColorFor(actor, this._adaptiveConfig, this.menu.actor));
@@ -1048,12 +1080,7 @@ export class QuickSettingsManager {
         this._adaptiveInFlight = true;
         const generation = this._adaptiveGeneration;
         this._contrastSampler
-            .chooseColorsForActors(targets, this._adaptiveConfig, this.menu?.actor, 
-        // In toggle mode the text is not drawn over the glass, so the glass's
-        // paint count says nothing about the sampled pixels.
-        () => this._activeMode === 'background' ? this.glass?.paintCount ?? NaN : NaN, 
-        // Only the whole-panel glass copies what is behind it.
-        () => this._activeMode === 'background' && this.glass instanceof BackdropGlass ? [this.glass] : [])
+            .chooseColorsForActors(targets, this._adaptiveConfig, this.menu?.actor, () => this.glass?.paintCount ?? NaN, () => (this.glass && (this._activeMode === 'background' || this._activeMode === 'toggles')) ? [this.glass] : [])
             .then(colorMap => {
             if (generation !== this._adaptiveGeneration || !this._adaptiveConfig.enabled)
                 return;
@@ -1072,8 +1099,8 @@ export class QuickSettingsManager {
         let themeNode = actor.get_theme_node();
         let startColor = themeNode.get_foreground_color();
         let targetRgb = hexToRgb(targetHexColor);
-        // Insensitive items keep their dimmed look.
-        let targetAlpha = isInsensitive ? 0.5 : 1.0;
+        // Insensitive items keep their dimmed look; subtitles keep elegant contrast
+        let targetAlpha = isInsensitive ? 0.5 : (actor.has_style_class_name?.('mac-sub') ? 0.65 : 1.0);
         let startAlpha = startColor.alpha / 255.0;
         // Replaces only the color rules, keeping whatever else the button alpha
         // dimming has put in the inline style.
@@ -1083,7 +1110,7 @@ export class QuickSettingsManager {
                 .filter(rule => !/^\s*(color|-st-icon-foreground-color)\s*:/.test(rule)).join(';').trim();
             // set_style() emits style-changed synchronously; see _watchBackdrop().
             this._applyingForeground = true;
-            actor.set_style(`${base}${base.endsWith(';') || !base ? '' : ';'} color: ${rgba}; -st-icon-foreground-color: ${rgba};`);
+            actor.set_style(`${base}${base.endsWith(';') || !base ? '' : ';'} color: ${rgba} !important; -st-icon-foreground-color: ${rgba} !important;`);
             this._applyingForeground = false;
         };
         // An existing tween is not cancelled: add() restarts from the color it

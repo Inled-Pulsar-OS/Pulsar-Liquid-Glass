@@ -5,7 +5,7 @@ import GLib from 'gi://GLib';
 import { BackdropGlass } from './rendering/backdropGlass.js';
 import { isActorValid } from './actors/lifecycle.js';
 import { addFrameTicker, removeFrameTicker } from './animation/frameTicker.js';
-import { StageContrastSampler, AdaptiveContrastConfig, sanitizeColorPreference } from './contrastSampler.js';
+import { StageContrastSampler, AdaptiveContrastConfig, sanitizeColorPreference, stateOwnsForeground } from './contrastSampler.js';
 import Gio from 'gi://Gio';
 import { ensureGlassAllocated } from './actors/allocation.js';
 import { getTransformedRect, resolveMonitorGeometry } from './actors/geometry.js';
@@ -536,9 +536,25 @@ export class NotificationManager {
         this._styledActors.delete(actor);
       });
     }
-    if (actor._currentTargetColor === color) return;
+    // A style that went back to the actor's own was reset by someone else;
+    // the color has to be put on again instead of being treated as unchanged.
+    const reset = actor._currentTargetColor !== undefined &&
+      (actor.get_style() ?? '') === (this._styledActors.get(actor) ?? '') &&
+      !adaptiveColorTweener.isAnimating(actor);
+    if (actor._currentTargetColor === color && !reset) return;
     actor._currentTargetColor = color;
     this._animateActorColor(actor, color, 380, skipAnimations, batchStart);
+  }
+
+  // Gives an actor back to its own stylesheet when a checked/active state
+  // paints a background image and must keep its own foreground color.
+  _releaseActorColor(actor: CustomBannerActor) {
+    const originalStyle = this._styledActors.get(actor);
+    if (originalStyle === undefined) return;
+    adaptiveColorTweener.cancel(actor);
+    actor._currentTargetColor = undefined;
+    actor.set_style(originalStyle || null);
+    this._styledActors.delete(actor);
   }
 
   _clearAdaptiveStyles() {
@@ -551,10 +567,18 @@ export class NotificationManager {
   }
 
   _applyAdaptiveColorMap(colorMap: Map<Clutter.Actor, string>, skipAnimations = false) {
+    // A checked/active state with its own background image owns the color of
+    // its children (see stateOwnsForeground()); give those actors back to
+    // their stylesheet instead of covering their state color.
+    for (const actor of [...this._styledActors.keys()]) {
+      if (stateOwnsForeground(actor, this.currentBanner))
+        this._releaseActorColor(actor as unknown as CustomBannerActor);
+    }
     if (!colorMap || colorMap.size === 0) return;
     // One timestamp for the whole map, so every label in the banner flips together.
     const batchStart = GLib.get_monotonic_time();
     for (const [actor, color] of colorMap.entries()) {
+      if (stateOwnsForeground(actor, this.currentBanner)) continue;
       this._setActorColor(actor as unknown as CustomBannerActor, color, skipAnimations, batchStart);
     }
   }
@@ -640,12 +664,12 @@ export class NotificationManager {
 
     const apply = (r: number, g: number, b: number, a: number) => {
       const rgba = `rgba(${r}, ${g}, ${b}, ${a.toFixed(3)})`;
-      actor.set_style(`${stylePrefix}color: ${rgba}; -st-icon-foreground-color: ${rgba};`);
+      actor.set_style(`${stylePrefix}color: ${rgba} !important; -st-icon-foreground-color: ${rgba} !important;`);
     };
 
     if (skipAnimations) {
       adaptiveColorTweener.cancel(actor);
-      actor.set_style(`${stylePrefix}color: ${targetHexColor}; -st-icon-foreground-color: ${targetHexColor};`);
+      actor.set_style(`${stylePrefix}color: ${targetHexColor} !important; -st-icon-foreground-color: ${targetHexColor} !important;`);
       return;
     }
 

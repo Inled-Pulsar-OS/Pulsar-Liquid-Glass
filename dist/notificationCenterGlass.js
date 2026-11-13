@@ -2,6 +2,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { QuickSettingsManager } from './quickSettingsManager.js';
 import { ToggleStyles } from './quickSettings/toggleStyles.js';
 import { hexToColorArray } from './animation/colors.js';
+import { sanitizeColorPreference, AdaptiveContrastConfig } from './contrastSampler.js';
 
 export class NotificationCenterGlassManager extends QuickSettingsManager {
     constructor(extensionPath, settings, logger) {
@@ -27,6 +28,14 @@ export class NotificationCenterGlassManager extends QuickSettingsManager {
         this._applyTo = 'toggles';
         this._toggleBaseStrength = this._settings.get_double('quick-settings-toggle-tint-strength');
         this._toggleCornerRadius = 32.5;
+        this._adaptiveConfig = {
+            ...AdaptiveContrastConfig,
+            enabled: this._settings.get_boolean('quick-settings-enable-adaptive-text-color'),
+            samplePerElement: false,
+            sampleIntervalMs: this._settings.get_int('quick-settings-sample-interval-ms') || 400,
+            preference: sanitizeColorPreference(
+                this._settings.get_string('quick-settings-adaptive-text-preference')),
+        };
         if (this._togglesDesired())
             this._applyEffect();
     }
@@ -37,6 +46,22 @@ export class NotificationCenterGlassManager extends QuickSettingsManager {
         };
         connectSetting('enable-quick-settings-glass', () => this._syncActivation());
         connectSetting('quick-settings-apply-to', () => this._syncActivation());
+        connectSetting('quick-settings-enable-adaptive-text-color', () => {
+            this._adaptiveConfig.enabled = this._settings.get_boolean('quick-settings-enable-adaptive-text-color');
+            if (this._adaptiveConfig.enabled) {
+                if (this.menu?.isOpen)
+                    this._startAdaptiveColorSampling(true);
+            } else {
+                this._stopAdaptiveColorSampling();
+                this._clearAdaptiveStyles();
+            }
+        });
+        connectSetting('quick-settings-adaptive-text-preference', () => {
+            this._adaptiveConfig.preference = sanitizeColorPreference(
+                this._settings.get_string('quick-settings-adaptive-text-preference'));
+            if (this.menu?.isOpen)
+                this._startAdaptiveColorSampling(true);
+        });
         connectSetting('quick-settings-tint-color', () => {
             this._tintColorArray = hexToColorArray(this._settings.get_string('quick-settings-tint-color'));
             if (this.glass)

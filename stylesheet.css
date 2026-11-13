@@ -390,8 +390,13 @@
 
 /* Dialogs with Liquid Glass */
 .modal-dialog.liquid-glass-transparent,
-.run-dialog.liquid-glass-transparent {
-    background-color: rgba(255, 255, 255, 0.05) !important;
+.run-dialog.liquid-glass-transparent,
+.prompt-dialog.liquid-glass-transparent,
+.pulsaros-about-dialog.liquid-glass-transparent,
+.pulsaros-about-dialog.pulsaros-about-dark.liquid-glass-transparent,
+.pulsaros-about-dialog.pulsaros-about-light.liquid-glass-transparent,
+.pulsaros-power-dialog.liquid-glass-transparent {
+    background-color: transparent !important;
     border: 1px solid rgba(255, 255, 255, 0.20) !important;
     border-radius: 20px !important;
     box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45) !important;

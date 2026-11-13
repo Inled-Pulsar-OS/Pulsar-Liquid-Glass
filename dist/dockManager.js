@@ -22,6 +22,8 @@ export class DashManager {
     _glassExpand;
     _signals;
     _settingsSignals;
+    // The dock-profile listeners; see _bindDockGlassProfile().
+    _dockProfileSignalIds = [];
     _frameSyncId;
     _frameSignalId = 0;
     _lastTickUs = 0;
@@ -130,6 +132,62 @@ export class DashManager {
             }
         });
     }
+    // PULSAR-GG5E -- the dock keeps its own glass profile: it refracts harder at
+    // the panel edge than the shared one. Applied after the material is built, so
+    // on a settings change this lands last and the dock override wins over the
+    // values read from the shared glass-* keys.
+    _applyDockGlassProfile() {
+        if (!this.glass || !this._settings)
+            return;
+        // PULSAR-GG7 -- the 0 = follow-the-shared-profile fallback must read the
+        // shared *schema* keys (glass-*), never the uniform names: Gio.Settings
+        // throws on an unknown key and that exception escaped _applyEffect halfway
+        // through, which cleared the dock's background and never showed the glass --
+        // an invisible dock. Every read is guarded so a key mismatch can only skip
+        // that one override, never take the dock effect down.
+        const override = (settingsKey, uniform, sharedKey) => {
+            // Starts at 0 so a failed read cannot leave it unassigned; a throw
+            // returns below before the value is ever used.
+            let value = 0;
+            try {
+                value = this._settings.get_double(settingsKey);
+            }
+            catch {
+                return;
+            }
+            if (!(value > 0)) {
+                try {
+                    value = this._settings.get_double(sharedKey);
+                }
+                catch {
+                    return;
+                }
+            }
+            this.glass?.setUniform(uniform, value);
+        };
+        override('dock-glass-shape-n', 'profile_shape_n', 'glass-profile-shape-n');
+        override('dock-glass-ior', 'ior', 'glass-ior');
+        override('dock-glass-displacement', 'displacement_scale', 'glass-displacement-scale');
+        // PULSAR-GG6B -- the dock's glass rect is small, so the shader caps its
+        // displacement at 30% of its short side (a few dozen px), while the
+        // monitor-sized UI glass gets a few hundred. A taller dome pushes more of
+        // the edge band against that cap, which is what makes the bar refract as
+        // visibly as the big surfaces.
+        override('dock-glass-max-z', 'max_z', 'glass-max-z');
+        this.glass?.queue_redraw();
+    }
+    // Reconnects the dock-profile listeners and applies the profile once.
+    _bindDockGlassProfile() {
+        for (const id of this._dockProfileSignalIds)
+            this._settings.disconnect(id);
+        this._dockProfileSignalIds = [];
+        for (const key of ['dock-glass-shape-n', 'dock-glass-ior',
+            'dock-glass-displacement', 'dock-glass-max-z']) {
+            const id = this._settings.connect(`changed::${key}`, () => this._applyDockGlassProfile());
+            this._dockProfileSignalIds.push(id);
+        }
+        this._applyDockGlassProfile();
+    }
     // Moves the dock away from the screen edge it is closest to by
     // dock-margin-bottom.
     _applyMargin() {
@@ -166,64 +224,6 @@ export class DashManager {
         this._currentMarginStyle = marginStyle;
         this.targetActor.set_style(`${this._originalStyle} ${marginStyle}`);
     }
-    // PULSAR-GG5E -- per-surface glass profile for the dock. Each key is an
-    // absolute override of the shared glass-* value; 0 follows the global
-    // profile, so the sliders keep leading when no override is set. The
-    // dock is the showcase surface: a steeper superellipse concentrates the
-    // refraction at the panel edge, a denser index and a longer throw make
-    // the bar read as liquid glass instead of plain transparency.
-    _applyDockGlassProfile() {
-        const uniforms = this.glass?._renderer?.uniforms;
-        if (!uniforms || !this._settings)
-            return;
-        // PULSAR-GG7 -- the 0 = follow-the-shared-profile fallback must
-        // read the shared *schema* keys (glass-*), never the uniform
-        // names: Gio.Settings throws on an unknown key and that exception
-        // escaped _applyEffect halfway through, which cleared the dock's
-        // background and never showed the glass -- an invisible dock.
-        // Every read is guarded so a key mismatch can only skip that one
-        // override, never take the dock effect down.
-        const override = (settingsKey, uniform, sharedKey) => {
-            let value;
-            try {
-                value = this._settings.get_double(settingsKey);
-            } catch {
-                return;
-            }
-            if (!(value > 0)) {
-                try {
-                    value = this._settings.get_double(sharedKey);
-                } catch {
-                    return;
-                }
-            }
-            uniforms.set(uniform, value);
-        };
-        override('dock-glass-shape-n', 'profile_shape_n', 'glass-profile-shape-n');
-        override('dock-glass-ior', 'ior', 'glass-ior');
-        override('dock-glass-displacement', 'displacement_scale', 'glass-displacement-scale');
-        // PULSAR-GG6B -- the dock's glass rect is small, so the shader caps
-        // its displacement at 30% of its short side (a few dozen px), while
-        // the monitor-sized UI glass gets a few hundred. A taller dome
-        // pushes more of the edge band against that cap, which is what
-        // makes the bar refract as visibly as the big surfaces.
-        override('dock-glass-max-z', 'max_z', 'glass-max-z');
-        this.glass?.queue_redraw?.();
-    }
-
-    _bindDockGlassProfile() {
-        for (const id of this._dockProfileSignalIds ?? [])
-            this._settings.disconnect(id);
-        this._dockProfileSignalIds = [];
-        for (const key of ['dock-glass-shape-n', 'dock-glass-ior',
-            'dock-glass-displacement', 'dock-glass-max-z']) {
-            const id = this._settings.connect(`changed::${key}`, () =>
-                this._applyDockGlassProfile());
-            this._dockProfileSignalIds.push(id);
-        }
-        this._applyDockGlassProfile();
-    }
-
     _applyEffect() {
         if (this._isEffectActive)
             return;
@@ -279,18 +279,18 @@ export class DashManager {
         glass.setSaturation(saturation);
         glass.setBlurRadius(blurRadius);
         glass.setIsDock(true);
-        // PULSAR-GG5E -- the dock keeps its own glass profile: it refracts
-        // harder at the panel edge than the shared one (see
-        // _applyDockGlassProfile). Bound after the material, so on a settings
-        // change this handler lands last and the dock override wins.
-        // PULSAR-GG7 -- a profile binding failure must never abort
-        // _applyEffect: the abort left the dock transparent with no glass
-        // behind it (invisible dock). The reads inside are guarded too;
-        // this is the last line of defence.
+        // PULSAR-GG5E -- the dock keeps its own glass profile: it refracts harder at
+        // the panel edge than the shared one (see _applyDockGlassProfile). Bound
+        // after the material, so on a settings change this handler lands last and
+        // the dock override wins.
+        // PULSAR-GG7 -- a profile binding failure must never abort _applyEffect: the
+        // abort left the dock transparent with no glass behind it (invisible dock).
+        // The reads inside are guarded too; this is the last line of defence.
         try {
             this._bindDockGlassProfile();
-        } catch (e) {
-            console.warn('liquid-glass: dock glass profile not applied:', e);
+        }
+        catch (e) {
+            this._logger.warn('[Liquid Glass] dock glass profile not applied:', e);
         }
         // Dash to Dock slides by relayout, so the frame tick sees last frame's
         // position; the paint-time hook corrects it.
@@ -372,8 +372,8 @@ export class DashManager {
             bounds = balanceDockBounds(bounds, this._actorBounds(refActor), edges);
         bounds = this._applyDockMargin(bounds, monitor, edges);
         // PULSAR-GG3C -- PulsarOS Golden Gate: the dock's hover magnification
-        // spreads the icon row past the bar; the panel follows it, one side
-        // at a time, so the magnified icons always sit inside the glass.
+        // spreads the icon row past the bar; the panel follows it, one side at a
+        // time, so the magnified icons always sit inside the glass.
         bounds = this._applyMagnifyOverflow(bounds);
         const { baseW, baseH } = bounds;
         if (baseW <= 9 || baseH <= 9) {
@@ -385,22 +385,24 @@ export class DashManager {
         this._syncDockVisibility(bounds, monitor);
         this._syncDockGlass(bounds, monitor);
     }
-    // PulsarOS Golden Gate: the dock publishes how far its magnified icon row
-    // spills past each end of the bar (`_pulsarMagnifyOverflow`, see the
-    // dock's `_pulsarMagnifyPublishOverflow`). The glass grows towards the
-    // icons on the side that needs it; without a spill nothing changes.
+    /**
+     * PulsarOS Golden Gate: the dock publishes how far its magnified icon row
+     * spills past each end of the bar (`_pulsarMagnifyOverflow`, written by the
+     * dock's `_pulsarMagnifyPublishOverflow` in Pulsar-Dock). The glass grows
+     * towards the icons on the side that needs it; without a spill nothing
+     * changes. The property lives on the dock actor, which this extension does
+     * not own, hence the cast.
+     */
     _applyMagnifyOverflow(bounds) {
         const overflow = this.targetActor?._pulsarMagnifyOverflow;
         if (!overflow)
             return bounds;
-
         const left = Math.max(0, overflow.left || 0);
         const right = Math.max(0, overflow.right || 0);
         const top = Math.max(0, overflow.top || 0);
         const bottom = Math.max(0, overflow.bottom || 0);
         if (!(left || right || top || bottom))
             return bounds;
-
         return {
             ...bounds,
             absX: bounds.absX - left,
@@ -409,7 +411,6 @@ export class DashManager {
             baseH: bounds.baseH + top + bottom,
         };
     }
-
     _actorBounds(actor) {
         const [baseW, baseH] = actor.get_size();
         const [absX, absY] = actor.get_transformed_position();
@@ -612,6 +613,11 @@ export class DashManager {
         for (let id of this._settingsSignals)
             this._settings.disconnect(id);
         this._settingsSignals = [];
+        // The dock-profile listeners are tracked separately, and without this they
+        // would outlive the manager and keep it reachable after the dock is gone.
+        for (const id of this._dockProfileSignalIds)
+            this._settings.disconnect(id);
+        this._dockProfileSignalIds = [];
     }
     // The first running-app indicator inside the dock (Dash to Dock's
     // IndicatorDrawingArea), used to balance the gaps around the icons.

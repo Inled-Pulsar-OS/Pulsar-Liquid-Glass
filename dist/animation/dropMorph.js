@@ -9,7 +9,6 @@
 // for the travel, springs for the two sizes, and a stretch taken from the
 // speed of the travel, so the body always leans into the direction it runs.
 import { Spring } from './spring.js';
-
 export class DropMorphMotion {
     // The travel: a flick that arrives right away, with a small recentering.
     static CENTER_OPEN = { stiffness: 170, damping: 17, mass: 1.0 };
@@ -41,7 +40,6 @@ export class DropMorphMotion {
     static ARRIVE_MAX_S = 0.45;
     static GLASS_IN_S = 0.05; // the glass is there almost at once
     static GLASS_OUT_S = 0.13;
-
     constructor(opening, buttonRect, menuRect, menuRadius, state = null, opts = null) {
         this.opening = opening;
         this._button = [...buttonRect];
@@ -56,12 +54,10 @@ export class DropMorphMotion {
         // more before it hums itself still.
         this._pace = Math.max(opts?.pace ?? 1, 0.05);
         const jig = Math.max(opts?.jiggle ?? 1, 0.05);
-
         const params = opening ? DropMorphMotion.CENTER_OPEN : DropMorphMotion.CENTER_CLOSE;
         const size = opening ? DropMorphMotion.SIZE_OPEN : DropMorphMotion.SIZE_CLOSE;
         const throwK = opening ? DropMorphMotion.THROW_OPEN : DropMorphMotion.THROW_CLOSE;
-        const soft = p => ({stiffness: p.stiffness, damping: p.damping / jig, mass: p.mass});
-
+        const soft = p => ({ stiffness: p.stiffness, damping: p.damping / jig, mass: p.mass });
         const softSize = soft(size);
         const drop = this._drop();
         this._szFrom = opening ? [drop, drop] : [...this._menu].slice(2, 4);
@@ -95,7 +91,6 @@ export class DropMorphMotion {
             ? [this._menu[2], this._menu[3]]
             : [drop, drop];
     }
-
     retarget(buttonRect, menuRect, menuRadius) {
         this._button = [...buttonRect];
         if (menuRect)
@@ -111,7 +106,6 @@ export class DropMorphMotion {
             [this._w.target, this._h.target] = [drop, drop];
         }
     }
-
     step(elapsedS) {
         // The pace folds into the time itself, so an opening run a touch
         // slower stretches every beat of the motion, thresholds included.
@@ -119,7 +113,6 @@ export class DropMorphMotion {
         this._t += dt;
         return this.opening ? this._open(dt) : this._close(dt);
     }
-
     get done() {
         if (this.opening) {
             return this._still(this._cx) && this._still(this._cy) && this._stoppedW && this._stoppedH;
@@ -127,26 +120,21 @@ export class DropMorphMotion {
         return this._arrivedAt >= 0 &&
             (this._t - this._arrivedAt) >= DropMorphMotion.GLASS_OUT_S + 0.02;
     }
-
     // The body's speed, for a motion that reverses this one.
     get velocities() {
         return [this._cx.velocity, this._cy.velocity];
     }
-
     _drop() {
         const [, , w, h] = this._button;
         return Math.max(Math.min(h * 1.05, w), 1);
     }
-
     _still(s) {
         return Math.abs(s.value - s.target) < 1.5 && Math.abs(s.velocity) < 10.0;
     }
-
     _stretch() {
         const speed = Math.hypot(this._cx.velocity, this._cy.velocity);
         return Math.min(speed / DropMorphMotion.SPEED_AT_MAX, 1) * DropMorphMotion.STRETCH_MAX;
     }
-
     _open(dt) {
         const t = this._t;
         // Springs in one go; the size ones wake after BLOOM_DELAY.
@@ -158,7 +146,6 @@ export class DropMorphMotion {
             if (!this._stoppedH)
                 this._stoppedH = this._h.update(dt * 1000) || this._still(this._h);
         }
-
         const drop = this._drop();
         let w = this._w.value, h = this._h.value;
         // From the birth size, if the springs have not woken yet.
@@ -180,13 +167,11 @@ export class DropMorphMotion {
             }
         }
         const w2 = Math.max(w, 1), h2 = Math.max(h, 1);
-
         // The corners round off into the panel's as the shape arrives.
         const span = Math.max(this._menu[2] - drop, 1);
         const grow = clamp01((w2 - drop) / span);
         const circle = Math.min(w2, h2) / 2;
         const radius = Math.min(_lerp(circle, this._menuRadius, easeOut(grow)), circle);
-
         // The items come in on a beat of their own: a little smaller than
         // their rest and catching up while the glass hums itself still.
         const p = easeOut(clamp01((t - DropMorphMotion.CONTENT_AT) / DropMorphMotion.CONTENT_S));
@@ -203,14 +188,12 @@ export class DropMorphMotion {
         };
         return this._lastFrame;
     }
-
     _close(dt) {
         const t = this._t;
         this._cx.update(dt * 1000);
         this._cy.update(dt * 1000);
         this._w.update(dt * 1000);
         this._h.update(dt * 1000);
-
         const drop = this._drop();
         let w = Math.max(this._w.value, 1), h = Math.max(this._h.value, 1);
         const e = this._stretch();
@@ -228,7 +211,6 @@ export class DropMorphMotion {
         const grow = clamp01(Math.max(0.001, (Math.max(w, h) - drop) / span));
         const circle = Math.min(w, h) / 2;
         let radius = Math.min(_lerp(circle, this._menuRadius, easeOut(grow)), circle);
-
         let [bx, by, bw, bh] = this._button;
         const near = _gap(this._cx.value, this._cy.value, bx + bw / 2, by + bh / 2)
             <= bh * DropMorphMotion.ARRIVE_PAD;
@@ -237,7 +219,6 @@ export class DropMorphMotion {
         const home = near && Math.hypot(this._cx.velocity, this._cy.velocity) < 500;
         if (this._arrivedAt < 0 && (home || t >= DropMorphMotion.ARRIVE_MAX_S))
             this._arrivedAt = t;
-
         let glassOpacity = 1;
         if (this._arrivedAt >= 0) {
             // Into the button's pill, wherever the springs are, and away.
@@ -275,12 +256,10 @@ export class DropMorphMotion {
         };
         return this._lastFrame;
     }
-
     // The last frame this motion produced; a reversed one picks up from it.
     get frame() {
         return this._lastFrame ?? null;
     }
-
     // The undistorted size, as a share of the panel's own: [w, h]. Managers
     // that scale an actor with the motion (where the glass is the actor's own
     // look) use these, so the springs drive their scale exactly as they would
@@ -288,46 +267,37 @@ export class DropMorphMotion {
     get scale() {
         return [this._w.value / Math.max(this._menu[2], 1), this._h.value / Math.max(this._menu[3], 1)];
     }
-
     // How stretched the body is right now, as a raw factor (0 to STRETCH_MAX):
     // the lean into the run, on top of the springs' own size.
     get stretch() {
         const speed = Math.hypot(this._cx.velocity, this._cy.velocity);
         return Math.min(speed / DropMorphMotion.SPEED_AT_MAX, 1) * DropMorphMotion.STRETCH_MAX;
     }
-
     // The axis the stretch leans on: 'y' the natural one, a sheet falling from
     // a pill above it, 'x' the rare sideways one.
     get axis() {
         return Math.abs(this._cy.velocity) >= Math.abs(this._cx.velocity) ? 'y' : 'x';
     }
 }
-
 // Where the drop is in its frame; the manager places glass and content with it.
 export function frameDone(motion) {
     return motion.done;
 }
-
 function _center(rect) {
     return [rect[0] + rect[2] / 2, rect[1] + rect[3] / 2];
 }
-
 function _gap(x1, y1, x2, y2) {
     return Math.hypot(x1 - x2, y1 - y2);
 }
-
 function _lerp(a, b, t) {
     return a + (b - a) * t;
 }
-
 function clamp01(v) {
     return v < 0 ? 0 : v > 1 ? 1 : v;
 }
-
 function easeOut(t) {
     return 1 - Math.pow(1 - t, 3);
 }
-
 function easeInOut(t) {
     return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }

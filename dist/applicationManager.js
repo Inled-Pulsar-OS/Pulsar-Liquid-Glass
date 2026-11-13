@@ -158,6 +158,8 @@ export class ApplicationManager {
     _windowMatchesBlacklist(metaWindow) {
         const wmClass = metaWindow.get_wm_class();
         const title = metaWindow.get_title();
+        // NotchNux DnD helper is a transparent window to capture drag/drop operations.
+        // It must NEVER receive liquid glass blur effect.
         if (wmClass) {
             const lower = wmClass.toLowerCase();
             if (lower.includes('notchnux') || lower.includes('notchnuxhelper'))
@@ -223,12 +225,6 @@ export class ApplicationManager {
         return this._windowMatchesWhitelist(metaWindow) ? 'application' : null;
     }
     _shouldApplyToWindow(windowActor) {
-        const _mWin = windowActor.get_meta_window();
-        if (_mWin) {
-            const _wm = (_mWin.get_wm_class() || "").toLowerCase();
-            const _tt = (_mWin.get_title() || "").toLowerCase();
-            if (_wm.includes("sayri") || _tt.includes("sayri") || _wm.includes("welcome") || _tt.includes("welcome")) return false;
-        }
         return this._profileForWindow(windowActor) !== null;
     }
     _applyEffects() {

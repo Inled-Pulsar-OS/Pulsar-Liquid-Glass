@@ -11,6 +11,13 @@ import { QS_MENU_TOGGLE_CLASS } from '../shellVersion.js';
 
 const TRANSPARENT_OVERRIDE = 'background-color: transparent !important;';
 
+// Foreground rules come from the adaptive color manager, which appends them
+// to whatever inline style the actor already carries. The override below is
+// lifted and re-applied periodically, so these rules must survive that cycle:
+// restoring the captured original style alone would wipe the adaptive color
+// until its owner noticed and put it back (see _resamplePod()).
+const FOREGROUND_RULE = /^\s*(color|-st-icon-foreground-color)\s*:/;
+
 type ToggleEntry = {
   destroyId: number;
   baseColor: [number, number, number];
@@ -27,13 +34,46 @@ function _withOverride(origStyle: string): string {
   return origStyle ? `${origStyle} ${TRANSPARENT_OVERRIDE}` : TRANSPARENT_OVERRIDE;
 }
 
+// The `color:`/`-st-icon-foreground-color:` declarations of a style string.
+function _foregroundRules(style: string): string[] {
+  if (!style) return [];
+  return style.split(';')
+    .map(rule => rule.trim())
+    .filter(rule => rule && FOREGROUND_RULE.test(rule));
+}
+
+// Foreground rules the actor gained after `origStyle` was captured, i.e. the
+// adaptive colors the toggle must not drop.
+function _extraForeground(style: string, origStyle: string): string[] {
+  const known = new Set(_foregroundRules(origStyle));
+  return _foregroundRules(style).filter(rule => !known.has(rule));
+}
+
+function _mergeStyle(style: string, extra: string[]): string {
+  const base = (style || '').trim();
+  if (extra.length === 0) return base;
+  const tail = `${extra.join('; ')};`;
+  if (!base) return tail;
+  return `${base.endsWith(';') ? base : `${base};`} ${tail}`;
+}
+
+function _restoreStyle(actor: Clutter.Actor, origStyle: string): void {
+  if (!(actor instanceof St.Widget)) return;
+  const extra = _extraForeground(actor.get_style() || '', origStyle);
+  actor.set_style(_mergeStyle(origStyle, extra) || null);
+}
+
+function _overrideStyle(actor: Clutter.Actor, origStyle: string): void {
+  if (!(actor instanceof St.Widget)) return;
+  const extra = _extraForeground(actor.get_style() || '', origStyle);
+  actor.set_style(_mergeStyle(_withOverride(origStyle), extra));
+}
+
 function _releaseEntry(pod: Clutter.Actor, entry: ToggleEntry): void {
   if (entry.destroyId)
     pod.disconnect(entry.destroyId);
-  for (const { actor, origStyle } of entry.styledSubs) {
-    if (actor instanceof St.Widget)
-      actor.set_style(origStyle || null);
-  }
+  for (const { actor, origStyle } of entry.styledSubs)
+    _restoreStyle(actor, origStyle);
 }
 
 export class ToggleStyles {
@@ -318,7 +358,7 @@ export class ToggleStyles {
     for (let sub of this._getStylableSubActors(pod)) {
       if (!(sub instanceof St.Widget) || this._hasOverride(sub)) continue;
       const origStyle = sub.get_style() || '';
-      sub.set_style(_withOverride(origStyle));
+      _overrideStyle(sub, origStyle);
       if (!known.has(sub)) entry.styledSubs.push({ actor: sub, origStyle });
     }
   }
@@ -338,9 +378,8 @@ export class ToggleStyles {
     if (!forceFull && stateKey === entry.stateKey) return;
     entry.stateKey = stateKey;
 
-    for (const { actor, origStyle } of entry.styledSubs) {
-      if (actor instanceof St.Widget) actor.set_style(origStyle || null);
-    }
+    for (const { actor, origStyle } of entry.styledSubs)
+      _restoreStyle(actor, origStyle);
 
     if (this._releaseIfSliderLostPill(pod, entry)) return;
 
@@ -349,9 +388,8 @@ export class ToggleStyles {
       if (this._debugToggleColorLogFrames > 0) this._logPodColor(pod, primary, entry, sampled);
     }
 
-    for (const { actor, origStyle } of entry.styledSubs) {
-      if (actor instanceof St.Widget) actor.set_style(_withOverride(origStyle));
-    }
+    for (const { actor, origStyle } of entry.styledSubs)
+      _overrideStyle(actor, origStyle);
   }
 
   // A theme switch does not rebuild the Quick Settings actors, so a slider

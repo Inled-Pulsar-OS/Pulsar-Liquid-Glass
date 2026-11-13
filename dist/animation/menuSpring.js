@@ -44,7 +44,9 @@ export function applyMenuFrame(frame, animActor, glass, menuActor, sync) {
         if (!menuActor)
             return;
         menuActor.hide();
+        menuActor.reactive = false;
         glass.opacity = 0;
+        glass.hide();
         animActor.opacity = 0;
         return;
     }

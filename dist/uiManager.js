@@ -1204,11 +1204,12 @@ export class UIManager {
             if (this.menu?.actor && isActorValid(this.menu.actor)) {
                 try {
                     const [mx, my] = this.menu.actor.get_transformed_position();
-                    const [mw, mh] = this.menu.actor.get_transformed_size();
+                    const [mw] = this.menu.actor.get_transformed_size();
                     if (Number.isFinite(mx) && Number.isFinite(my) && mw > 10) {
                         return [mx + mw / 2 - 20, Math.max(0, my - 10), 40, 4];
                     }
-                } catch (e) {}
+                }
+                catch (e) { }
             }
             return null;
         }

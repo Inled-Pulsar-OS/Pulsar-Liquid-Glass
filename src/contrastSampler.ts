@@ -13,7 +13,7 @@ import { coglContext, paintStageToContent } from './shellVersion.js';
 // How much better the other color has to score before the decision flips.
 // With a preferred color set, flipping towards it is easy and away from it
 // hard.
-const SWITCH_ADVANTAGE = 1.2;
+const SWITCH_ADVANTAGE = 1.05;
 const SWITCH_ADVANTAGE_TOWARD_PREFERRED = 1.02;
 const SWITCH_ADVANTAGE_AGAINST_PREFERRED = 1.6;
 // Contrast ratios this close mean the background favours neither color; a
@@ -348,6 +348,40 @@ function _bestCopy(rect: SampleRect, drawn: BackdropSource[]) {
   return best;
 }
 
+/**
+ * True when an ancestor is in a state (`:checked`, `:active`) that paints a
+ * background image. Such a state owns the foreground color of its children:
+ * the CC's white bubbles/circles are background images, so their luminance
+ * cannot be measured from the theme. Leaving the stylesheet in charge keeps
+ * their icons black instead of applying the sampled (light) glass color.
+ */
+export function stateOwnsForeground(actor: Clutter.Actor, root: Clutter.Actor | null = null): boolean {
+  let node: any = actor;
+
+  for (let depth = 0; node && depth < BACKDROP_SEARCH_DEPTH; depth++) {
+    if (typeof node.has_style_pseudo_class === 'function') {
+      let stateful = false;
+      try {
+        stateful = node.has_style_pseudo_class('checked') || node.has_style_pseudo_class('active');
+      } catch {
+        stateful = false;
+      }
+      if (stateful) {
+        try {
+          if (node.get_theme_node?.().get_background_image?.()) return true;
+        } catch {
+          // A widget without a theme node (or an old St) has no image.
+        }
+      }
+    }
+
+    if (root && node === root) break;
+    node = node.get_parent();
+  }
+
+  return false;
+}
+
 export function backdropLuminance(actor: Clutter.Actor, root: Clutter.Actor | null = null): { luminance: number, alpha: number } | null {
   let node: any = actor;
 
@@ -462,6 +496,11 @@ export class StageContrastSampler {
   reset(): void {
     this.invalidate();
     this._lastRect = null;
+    this._lastLuma = null;
+    this._lastIsBright = null;
+    this._lastRawLuma = null;
+    this._lastSwitchAt = null;
+    this._roundsSinceFlip = READABILITY_FLIP_COOLDOWN;
   }
 
   /**
@@ -499,10 +538,18 @@ export class StageContrastSampler {
       return null;
     }
 
-    // A screenshot contains the text itself, whose color is what is being
-    // decided. Trimming 30% from each end (an interquartile mean) keeps the
-    // glyphs from moving the result, so a flip cannot flip itself back.
-    return _trimmedMean(values, 0.30);
+    const trimmed = _trimmedMean(values, 0.08);
+    if (trimmed === null) return null;
+
+    // If a significant fraction (>= 35%) of the background is bright (luma >= 0.35),
+    // white text will wash out on those bright areas. Guarantee dark text readability.
+    const brightCount = values.filter(v => v >= 0.35).length;
+    const brightFraction = brightCount / values.length;
+    if (brightFraction >= 0.35) {
+      return Math.max(trimmed, 0.45);
+    }
+
+    return trimmed;
   }
 
   /**
@@ -590,7 +637,7 @@ export class StageContrastSampler {
     }
 
     const smoothed = this._lastLuma === null
-      ? luminance : this._lastLuma * 0.7 + luminance * 0.3;
+      ? luminance : this._lastLuma * 0.4 + luminance * 0.6;
     this._lastLuma = smoothed;
     const lightContrast = contrast(smoothed, light);
     const darkContrast = contrast(smoothed, dark);

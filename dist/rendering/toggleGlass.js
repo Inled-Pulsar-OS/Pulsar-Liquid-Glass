@@ -109,6 +109,12 @@ export const ToggleBackdropGlass = GObject.registerClass(paintNodeWithContext(cl
         this._wasPainted = painted;
         this.reader.copier.prune(this.reader.peek_stage_views());
     }
+    backdropCopy() {
+        const copy = this.reader?.copier?.lastCopy;
+        if (!copy?.rect)
+            return null;
+        return { texture: copy.texture, rect: copy.rect };
+    }
     vfunc_paint_node(root, paintContext) {
         const ctx = this._beginPaint();
         if (!ctx)
